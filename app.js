@@ -18,6 +18,7 @@
   const maxSweepsIn = $('#maxSweeps');
   const startBtn = $('#start');
   const stopBtn = $('#stop');
+  const saveBtn = $('#save');
   const palFree = $('#palFree');
   const palFull = $('#palFull');
   const palettePreview = $('#palettePreview');
@@ -90,7 +91,7 @@
   palFull.addEventListener('change', ()=>{ if(palFull.checked) setPalette(FULL_COUNT); });
 
   let W=0,H=0; // working dims
-  let SRC_IMG=null; let SRC_W0=0, SRC_H0=0; // original
+  let SRC_IMG=null; let SRC_W0=0, SRC_H0=0; let SRC_NAME=''; // original
   let Tlin=null; // Float32Array N*3
   let TYCG_lin=null; // Float32Array N*3
   let TYCG_srgb=null; // Float32Array N*3
@@ -145,6 +146,7 @@
     sImg.textContent = `${W}×${H}`;
     if (ntCountEl){ let nt=0; for(let i=0;i<N;i++){ if(A8[i]>0) nt++; } ntCountEl.textContent = nt.toLocaleString(); }
     drawOutFromQ(null);
+    if (saveBtn) saveBtn.disabled = true;
     selectDomain();
     updateScaleUI();
   }
@@ -153,7 +155,7 @@
     if(!f) return;
     const url=URL.createObjectURL(f);
     const img=new Image(); img.src=url; await img.decode();
-    SRC_IMG = img; SRC_W0 = img.naturalWidth; SRC_H0 = img.naturalHeight;
+    SRC_IMG = img; SRC_W0 = img.naturalWidth; SRC_H0 = img.naturalHeight; SRC_NAME = typeof f.name === 'string' ? f.name : '';
     await rebuildFromImage(SRC_IMG);
     log('Image loaded.');
     URL.revokeObjectURL(url);
@@ -172,7 +174,7 @@
 
   function drawOutFromQ(Qidx){
     ctxOut.clearRect(0,0,canvOut.width, canvOut.height);
-    if(!Qidx || !paletteLin.length) return;
+    if(!Qidx || !paletteLin.length){ if(saveBtn) saveBtn.disabled=true; return; }
     const N=W*H; const imgData=ctxOut.createImageData(W,H); const d=imgData.data;
     for(let i=0;i<N;i++){
       const idx = Qidx[i]>>>0; const q = paletteLin[idx]||[0,0,0];
@@ -192,6 +194,7 @@
       }
     }
     ctxOut.putImageData(imgData,0,0);
+    if (saveBtn) saveBtn.disabled=false;
   }
 
   function buildGaussian2D(sigma, radius=0){
@@ -463,6 +466,19 @@
   }
 
   stopBtn.addEventListener('click', ()=>{ abortFlag=true; setStatus('Aborting…'); log('Stop requested…'); });
+  saveBtn.addEventListener('click', async ()=>{
+    if(!SRC_IMG){ alert('Load an image first.'); return; }
+    let base = 'image';
+    if (SRC_NAME){ const m = SRC_NAME.match(/^(.+?)(\.[^.]+)?$/); base = (m && m[1]) ? m[1] : SRC_NAME; }
+    const fname = `${base}_quantized.png`;
+    canvOut.toBlob((blob)=>{
+      if(!blob){ alert('Failed to export image.'); return; }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fname; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=> URL.revokeObjectURL(url), 500);
+    }, 'image/png');
+  });
   startBtn.addEventListener('click', async ()=>{
     if(!Tlin || !paletteRGB.length){ alert('Load an image first.'); return; }
     abortFlag=false; startBtn.disabled=true; setStatus('Initializing…'); log('Starting DBS');

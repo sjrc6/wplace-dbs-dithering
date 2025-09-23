@@ -33,6 +33,8 @@
   const scaleValEl = document.getElementById('scaleVal');
   const scaleDimsEl = document.getElementById('scaleDims');
   const ntCountEl = document.getElementById('ntCount');
+  const viewScaleIn = document.getElementById('viewScale');
+  const viewScaleValEl = document.getElementById('viewScaleVal');
   domainLin.addEventListener('change', selectDomain);
   domainSRGB.addEventListener('change', selectDomain);
 
@@ -118,6 +120,24 @@
     } else if (ntCountEl){
       ntCountEl.textContent = '–';
     }
+    if (viewScaleIn && viewScaleValEl){
+      const vr = Number(viewScaleIn.value);
+      const vs = Number.isFinite(vr) ? vr : 1.0;
+      viewScaleValEl.textContent = vs.toFixed(2)+'×';
+    }
+  }
+
+  function applyViewScale(){
+    if (!viewScaleIn) return;
+    const raw = Number(viewScaleIn.value);
+    const vs = Math.max(0.25, Math.min(6, Number.isFinite(raw)?raw:1.0));
+    if (W && H){
+      canvSrc.style.width = (W*vs)+'px';
+      canvSrc.style.height = (H*vs)+'px';
+      canvOut.style.width = (W*vs)+'px';
+      canvOut.style.height = (H*vs)+'px';
+    }
+    if (viewScaleValEl) viewScaleValEl.textContent = vs.toFixed(2)+'×';
   }
 
   async function rebuildFromImage(img){
@@ -158,6 +178,7 @@
     if (saveBtn) saveBtn.disabled = true;
     selectDomain();
     updateScaleUI();
+    applyViewScale();
   }
 
   async function loadFromFile(f){
@@ -180,6 +201,7 @@
   document.addEventListener('drop', (e)=>{ if(e.target!==dropZone) e.preventDefault(); });
   scaleIn.addEventListener('input', ()=>{ updateScaleUI(); if(SRC_IMG) rebuildFromImage(SRC_IMG); });
   if (scaleModeIn){ scaleModeIn.addEventListener('change', ()=>{ if(SRC_IMG) rebuildFromImage(SRC_IMG); }); }
+  if (viewScaleIn){ viewScaleIn.addEventListener('input', ()=>{ applyViewScale(); updateScaleUI(); }); }
   updateScaleUI();
 
   function drawOutFromQ(Qidx){

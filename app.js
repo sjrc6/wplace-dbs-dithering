@@ -19,6 +19,7 @@
   const startBtn = $('#start');
   const stopBtn = $('#stop');
   const saveBtn = $('#save');
+  const scaleModeIn = document.getElementById('scaleMode');
   const palFree = $('#palFree');
   const palFull = $('#palFull');
   const palettePreview = $('#palettePreview');
@@ -126,7 +127,15 @@
     const s = Math.max(0.01, Math.min(10, sval));
     W=Math.max(1, Math.round(img.naturalWidth*s)); H=Math.max(1, Math.round(img.naturalHeight*s));
 
-    canvSrc.width=W; canvSrc.height=H; ctxSrc.imageSmoothingEnabled=false; ctxSrc.drawImage(img,0,0,W,H);
+    canvSrc.width=W; canvSrc.height=H;
+    const modeVal = (scaleModeIn && scaleModeIn.value) || 'nearest';
+    try { Scaler.drawScaledImage(img, canvSrc, modeVal); }
+    catch(e){
+      if (modeVal !== 'nearest') { try { log('Resample "'+modeVal+'" unavailable (WebGL). Falling back to nearest.'); } catch(_){} }
+      ctxSrc.imageSmoothingEnabled = false;
+      if ('imageSmoothingQuality' in ctxSrc) ctxSrc.imageSmoothingQuality = 'low';
+      ctxSrc.drawImage(img,0,0,W,H);
+    }
     canvOut.width=W; canvOut.height=H; ctxOut.imageSmoothingEnabled=false;
 
     const srcData = ctxSrc.getImageData(0,0,W,H).data;
@@ -170,6 +179,7 @@
   document.addEventListener('dragover', (e)=>{ e.preventDefault(); });
   document.addEventListener('drop', (e)=>{ if(e.target!==dropZone) e.preventDefault(); });
   scaleIn.addEventListener('input', ()=>{ updateScaleUI(); if(SRC_IMG) rebuildFromImage(SRC_IMG); });
+  if (scaleModeIn){ scaleModeIn.addEventListener('change', ()=>{ if(SRC_IMG) rebuildFromImage(SRC_IMG); }); }
   updateScaleUI();
 
   function drawOutFromQ(Qidx){

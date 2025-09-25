@@ -20,9 +20,9 @@
       <div class="row">
         <label>Sampling
           <select id="scaleMode">
-            <option value="nearest" selected>Nearest</option>
+            <option value="nearest">Nearest</option>
             <option value="bilinear">Bilinear</option>
-            <option value="bicubic">Bicubic</option>
+            <option value="bicubic" selected>Bicubic</option>
           </select>
         </label>
       </div>
@@ -61,8 +61,8 @@
     <fieldset>
       <legend>2) Palette</legend>
       <div class="row-inline">
-        <label><input type="radio" name="palopt" id="palFree" checked> Free (31)</label>
-        <label><input type="radio" name="palopt" id="palFull"> Full (63)</label>
+        <label><input type="radio" name="palopt" id="palFree"> Free (31)</label>
+        <label><input type="radio" name="palopt" id="palFull" checked> Full (63)</label>
       </div>
       <div id="palettePreview" class="palette-row" aria-live="polite"></div>
     </fieldset>
@@ -70,16 +70,14 @@
     <fieldset>
       <legend>3) DBS settings</legend>
       <div class="row">
-        <label>Gaussian σ
-          <input id="sigma" type="number" step="0.1" value="1.0" min="0.5" max="10" />
-        </label>
-        <label>Kernel radius (0=auto)
-          <input id="radius" type="number" value="0" min="0" max="32" />
+        <label>Grain size
+          <input id="noiseSize" type="range" step="0.05" value="0.9" min="0" max="1" />
+          <span id="noiseSizeVal">0.5</span>
         </label>
       </div>
       <div class="row">
         <label>Candidate colors
-          <input id="kCand" type="number" value="12" min="1" max="64" />
+          <input id="kCand" type="number" value="16" min="1" max="64" />
         </label>
         <label>Max sweeps
           <input id="maxSweeps" type="number" value="6" min="1" max="100" />

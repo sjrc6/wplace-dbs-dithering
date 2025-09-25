@@ -12,8 +12,6 @@
   const logEl = $('#log');
 
   const scaleIn = $('#scale');
-  const sigmaIn = $('#sigma');
-  const radiusIn = $('#radius');
   const kCandIn = $('#kCand');
   const maxSweepsIn = $('#maxSweeps');
   const startBtn = $('#start');
@@ -26,6 +24,7 @@
   const wYIn = $('#wY');
   const wCIn = $('#wC');
   const wFidIn = $('#wFid');
+  const noiseSizeIn = document.getElementById('noiseSize');
   const doSwapsIn = $('#doSwaps');
   const domainLin = document.getElementById('domainLin');
   const domainSRGB = document.getElementById('domainSRGB');
@@ -35,6 +34,7 @@
   const ntCountEl = document.getElementById('ntCount');
   const viewScaleIn = document.getElementById('viewScale');
   const viewScaleValEl = document.getElementById('viewScaleVal');
+  const noiseSizeValEl = document.getElementById('noiseSizeVal');
   domainLin.addEventListener('change', selectDomain);
   domainSRGB.addEventListener('change', selectDomain);
 
@@ -125,6 +125,11 @@
       const vs = Number.isFinite(vr) ? vr : 1.0;
       viewScaleValEl.textContent = vs.toFixed(2)+'×';
     }
+    if (noiseSizeIn && noiseSizeValEl){
+      const nr = Number(noiseSizeIn.value);
+      const ns = Number.isFinite(nr) ? Math.max(0, Math.min(1, nr)) : 0.5;
+      noiseSizeValEl.textContent = ns.toFixed(2);
+    }
   }
 
   function applyViewScale(){
@@ -202,6 +207,7 @@
   scaleIn.addEventListener('input', ()=>{ updateScaleUI(); if(SRC_IMG) rebuildFromImage(SRC_IMG); });
   if (scaleModeIn){ scaleModeIn.addEventListener('change', ()=>{ if(SRC_IMG) rebuildFromImage(SRC_IMG); }); }
   if (viewScaleIn){ viewScaleIn.addEventListener('input', ()=>{ applyViewScale(); updateScaleUI(); }); }
+  if (noiseSizeIn){ noiseSizeIn.addEventListener('input', ()=>{ updateScaleUI(); }); }
   updateScaleUI();
 
   function drawOutFromQ(Qidx){
@@ -229,16 +235,33 @@
     if (saveBtn) saveBtn.disabled=false;
   }
 
-  function buildGaussian2D(sigma, radius=0){
-    const r = radius>0 ? radius : Math.max(1, Math.ceil(3*sigma));
-    const size = 2*r+1, K = new Float32Array(size*size);
-    const s2 = 2*sigma*sigma; let sum=0, t=0;
+  function buildGaussian2D(sigma, radius=0, halfMix=0){
+    const r = radius>0 ? Math.max(3, radius|0) : Math.max(1, Math.ceil(3*sigma));
+    const size = 2*r+1;
+
+    const a = Math.max(0, Math.min(1, Number.isFinite(halfMix) ? halfMix : 0));
+    const s2_1 = 2*sigma*sigma;
+    const sigma2 = sigma*0.6;
+    const s2_2 = 2*sigma2*sigma2;
+
+    const K1 = new Float32Array(size*size);
+    const K2 = new Float32Array(size*size);
+    let sum1=0, sum2=0, t=0;
     for (let y=-r; y<=r; y++){
       for (let x=-r; x<=r; x++, t++){
-        const w = Math.exp(-(x*x+y*y)/s2); K[t]=w; sum+=w;
+        const w1 = Math.exp(-(x*x+y*y)/s2_1);
+        K1[t]=w1; sum1+=w1;
+        const w2 = Math.exp(-(x*x+y*y)/s2_2);
+        K2[t]=w2; sum2+=w2;
       }
     }
+    for (let i=0;i<K1.length;i++){ K1[i]/=sum1; K2[i]/=sum2; }
+
+    const K = new Float32Array(size*size);
+    let sum=0;
+    for (let i=0;i<K.length;i++){ const v=(1-a)*K1[i] + a*K2[i]; K[i]=v; sum+=v; }
     for (let i=0;i<K.length;i++) K[i]/=sum;
+
     let C=0; for (let i=0;i<K.length;i++) C+=K[i]*K[i];
 
     const r2 = 2*r; const sizeA = 2*r2+1;
@@ -295,9 +318,9 @@
   }
 
   let abortFlag=false;
-  async function runDBS({W,H, TYCG, A8, paletteRGB, paletteLin, paletteYCG, sigma=1.0, radius=0, kCand=null, maxSweeps=8, wY=1.0, wC=0.35, lambdaF=0.0, seedQidx=null, trySwaps=true, onProgress}){
+  async function runDBS({W,H, TYCG, A8, paletteRGB, paletteLin, paletteYCG, sigma=1.0, radius=0, hvsMix=0.0, kCand=null, maxSweeps=8, wY=1.0, wC=0.35, lambdaF=0.0, seedQidx=null, trySwaps=true, onProgress}){
     const M=paletteRGB.length;
-    const {K, r, C, A, r2} = buildGaussian2D(sigma, radius);
+    const {K, r, C, A, r2} = buildGaussian2D(sigma, radius, hvsMix);
     const pad = 2*r; // expand by 2*r on each side
     const Wcore = W, Hcore = H;
 
@@ -349,7 +372,17 @@
     const S = new Float32Array(N*3); convolve2D3(R,S,W,H,K,r);
 
     function energyFromR(){ let E=0; for(let i=0;i<N;i++){ if (A8 && A8[i]===0) continue; const j=i*3; const r0=R[j], r1=R[j+1], r2c=R[j+2]; E += wY*r0*r0 + wC*r1*r1 + wC*r2c*r2c; } return E; }
-    function energyFidelity(){ if(lambdaF<=0) return 0; let Ef=0; for(let i=0;i<N;i++){ if (A8 && A8[i]===0) continue; const j=i*3; const q=paletteYCG[Qidx[i]]; const dY=q[0]-TYCG[j]; const dCo=q[1]-TYCG[j+1]; const dCg=q[2]-TYCG[j+2]; Ef += wY*dY*dY + wC*dCo*dCo + wC*dCg*dCg; } return lambdaF*Ef; }
+    function energyFidelity(){ 
+      if(lambdaF<=0) return 0; let Ef=0; for(let i=0;i<N;i++){ 
+        if (A8 && A8[i]===0) continue; 
+        const j=i*3; const q=paletteYCG[Qidx[i]]; 
+        const dY=q[0]-TYCG[j]; 
+        const dCo=q[1]-TYCG[j+1]; 
+        const dCg=q[2]-TYCG[j+2]; 
+        Ef += wY*dY*dY + wC*dCo*dCo + wC*dCg*dCg; 
+      } 
+      return lambdaF*Ef; 
+    }
     let E = energyFromR() + energyFidelity();
 
     const Kcand = (kCand && kCand>0 && kCand<M) ? kCand : M;
@@ -514,10 +547,8 @@
   startBtn.addEventListener('click', async ()=>{
     if(!Tlin || !paletteRGB.length){ alert('Load an image first.'); return; }
     abortFlag=false; startBtn.disabled=true; setStatus('Initializing…'); log('Starting DBS');
-    const sigmaRaw = Number(sigmaIn && sigmaIn.value);
-    const sigma = Math.max(0.5, Number.isFinite(sigmaRaw) ? sigmaRaw : 1.0);
-    const radiusRaw = Number(radiusIn && radiusIn.value);
-    const radius = Math.max(0, Math.floor(Number.isFinite(radiusRaw) ? radiusRaw : 0));
+    const sigma = 1.0;
+    const radius = 0;
     const kRaw = Number(kCandIn && kCandIn.value);
     const kCand = Math.max(1, Math.floor(Number.isFinite(kRaw) ? kRaw : paletteRGB.length));
     const sweepsRaw = Number(maxSweepsIn && maxSweepsIn.value);
@@ -528,9 +559,12 @@
     const wC = Math.max(0.01, Number.isFinite(wCraw) ? wCraw : 0.35);
     const lamRaw = Number(wFidIn && wFidIn.value);
     const lambdaF = Math.max(0, Number.isFinite(lamRaw) ? lamRaw : 0.0);
+    const nsRaw = Number(noiseSizeIn && noiseSizeIn.value);
+    const nsClamped = Math.max(0, Math.min(1, Number.isFinite(nsRaw) ? nsRaw : 0.5));
+    const hvsMix = 1 - nsClamped;
     const trySwaps = !!doSwapsIn.checked;
     try{
-      const {Qidx, energy} = await runDBS({ W, H, TYCG, A8, paletteRGB, paletteLin, paletteYCG, sigma, radius, kCand, maxSweeps, wY, wC, lambdaF, seedQidx:null, trySwaps,
+      const {Qidx, energy} = await runDBS({ W, H, TYCG, A8, paletteRGB, paletteLin, paletteYCG, sigma, radius, hvsMix, kCand, maxSweeps, wY, wC, lambdaF, seedQidx:null, trySwaps,
         onProgress: ({sweep, E, moves, Qidx})=>{ setStatus(`Sweep ${sweep}…`); sSweep.textContent=String(sweep); sMoves.textContent=String(moves); sEnergy.textContent=Number(E).toExponential(4); drawOutFromQ(Qidx); } });
       sEnergy.textContent = Number(energy).toExponential(4);
       setStatus('Done'); log('Converged or reached limits.');
@@ -539,5 +573,5 @@
     finally { startBtn.disabled=false; }
   });
 
-  setPalette(FREE_COUNT);
+  setPalette(FULL_COUNT);
 })();

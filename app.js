@@ -25,6 +25,7 @@
   const wCIn = $('#wC');
   const wFidIn = $('#wFid');
   const noiseSizeIn = document.getElementById('noiseSize');
+  const initModeIn = document.getElementById('initMode');
   const doSwapsIn = $('#doSwaps');
   const domainLin = document.getElementById('domainLin');
   const domainSRGB = document.getElementById('domainSRGB');
@@ -318,7 +319,7 @@
   }
 
   let abortFlag=false;
-  async function runDBS({W,H, TYCG, A8, paletteRGB, paletteLin, paletteYCG, sigma=1.0, radius=0, hvsMix=0.0, kCand=null, maxSweeps=8, wY=1.0, wC=0.35, lambdaF=0.0, seedQidx=null, trySwaps=true, onProgress}){
+  async function runDBS({W,H, TYCG, A8, paletteRGB, paletteLin, paletteYCG, sigma=1.0, radius=0, hvsMix=0.0, kCand=null, maxSweeps=8, wY=1.0, wC=0.35, lambdaF=0.0, seedQidx=null, trySwaps=true, initMode='random', onProgress}){
     const M=paletteRGB.length;
     const {K, r, C, A, r2} = buildGaussian2D(sigma, radius, hvsMix);
     const pad = 2*r; // expand by 2*r on each side
@@ -331,6 +332,7 @@
     function reflectIndex(p, L){ const period = 2*L; let q = p % period; if(q<0) q += period; return q < L ? q : (2*L - 1 - q); }
 
     const TYCGexp = new Float32Array(Nexp*3);
+    const Tlinexp = new Float32Array(Nexp*3);
     const A8exp = A8 ? new Uint8Array(Nexp) : null;
     for(let ye=0; ye<Hexp; ye++){
       const yb = ye - pad; const ys = reflectIndex(yb, Hcore);
@@ -341,6 +343,10 @@
         TYCGexp[dst] = TYCG[src];
         TYCGexp[dst+1] = TYCG[src+1];
         TYCGexp[dst+2] = TYCG[src+2];
+        // expand linear RGB too for FS in RGB space
+        Tlinexp[dst] = Tlin[src];
+        Tlinexp[dst+1] = Tlin[src+1];
+        Tlinexp[dst+2] = Tlin[src+2];
         if(A8exp){ A8exp[ye*Wexp + xe] = A8[ys*Wcore + xs]; }
       }
     }
@@ -350,15 +356,91 @@
     const Qidx = new Uint8Array(N);
     if (seedQidx && seedQidx.length===N){ Qidx.set(seedQidx); }
     else {
+      if (initMode === 'fs'){
+        const err = new Float32Array(N*3);
+        for(let y=0; y<H; y++){
+          const ltr = (y & 1) === 0; 
+          const xStart = ltr ? 0 : (W-1);
+          const xEnd = ltr ? W : -1;
+          const xStep = ltr ? 1 : -1;
+          for(let x=xStart; x!==xEnd; x+=xStep){
+            const i = y*W + x; const j = i*3;
+            if (A8 && A8[i]===0){ Qidx[i]=0; continue; }
+            const tR0 = Tlinexp[j] + err[j];
+            const tG0 = Tlinexp[j+1] + err[j+1];
+            const tB0 = Tlinexp[j+2] + err[j+2];
+            const tR = tR0<0?0:(tR0>1?1:tR0);
+            const tG = tG0<0?0:(tG0>1?1:tG0);
+            const tB = tB0<0?0:(tB0>1?1:tB0);
+            let best=0, bestD=Infinity;
+            for(let c=0;c<M;c++){
+              const q=paletteLin[c];
+              const dR=tR-q[0], dG=tG-q[1], dB=tB-q[2];
+              const D=dR*dR + dG*dG + dB*dB;
+              if(D<bestD){ bestD=D; best=c; }
+            }
+            Qidx[i]=best;
+            const qb = paletteLin[best];
+            const eR = tR - qb[0];
+            const eG = tG - qb[1];
+            const eB = tB - qb[2];
+            if (ltr){
+              if (x+1 < W){ const n=(y*W + (x+1)); if(!(A8 && A8[n]===0)){ const nj=n*3; err[nj]+=eR*7/16; err[nj+1]+=eG*7/16; err[nj+2]+=eB*7/16; } }
+              if (y+1 < H && x-1 >= 0){ const n=((y+1)*W + (x-1)); if(!(A8 && A8[n]===0)){ const nj=n*3; err[nj]+=eR*3/16; err[nj+1]+=eG*3/16; err[nj+2]+=eB*3/16; } }
+              if (y+1 < H){ const n=((y+1)*W + x); if(!(A8 && A8[n]===0)){ const nj=n*3; err[nj]+=eR*5/16; err[nj+1]+=eG*5/16; err[nj+2]+=eB*5/16; } }
+              if (y+1 < H && x+1 < W){ const n=((y+1)*W + (x+1)); if(!(A8 && A8[n]===0)){ const nj=n*3; err[nj]+=eR*1/16; err[nj+1]+=eG*1/16; err[nj+2]+=eB*1/16; } }
+            } else {
+              if (x-1 >= 0){ const n=(y*W + (x-1)); if(!(A8 && A8[n]===0)){ const nj=n*3; err[nj]+=eR*7/16; err[nj+1]+=eG*7/16; err[nj+2]+=eB*7/16; } }
+              if (y+1 < H && x+1 < W){ const n=((y+1)*W + (x+1)); if(!(A8 && A8[n]===0)){ const nj=n*3; err[nj]+=eR*3/16; err[nj+1]+=eG*3/16; err[nj+2]+=eB*3/16; } }
+              if (y+1 < H){ const n=((y+1)*W + x); if(!(A8 && A8[n]===0)){ const nj=n*3; err[nj]+=eR*5/16; err[nj+1]+=eG*5/16; err[nj+2]+=eB*5/16; } }
+              if (y+1 < H && x-1 >= 0){ const n=((y+1)*W + (x-1)); if(!(A8 && A8[n]===0)){ const nj=n*3; err[nj]+=eR*1/16; err[nj+1]+=eG*1/16; err[nj+2]+=eB*1/16; } }
+            }
+          }
+        }
+      } else {
+      const useNearest = initMode === 'nearest';
+      const useRandom = initMode === 'random';
       for(let i=0;i<N;i++){
         if (A8 && A8[i]===0){ Qidx[i]=0; continue; }
         const j=i*3, tY=TYCG[j], tCo=TYCG[j+1], tCg=TYCG[j+2];
-        let best=0, bestD=Infinity;
-        for(let c=0;c<M;c++){
-          const q=paletteYCG[c]; const dY=tY-q[0], dCo=tCo-q[1], dCg=tCg-q[2];
-          const D=wY*dY*dY + wC*dCo*dCo + wC*dCg*dCg; if(D<bestD){bestD=D; best=c;}
+
+        if (useNearest){
+          let best=0, bestD=Infinity;
+          for(let c=0;c<M;c++){
+            const q=paletteYCG[c]; const dY=tY-q[0], dCo=tCo-q[1], dCg=tCg-q[2];
+            const D=wY*dY*dY + wC*dCo*dCo + wC*dCg*dCg; if(D<bestD){bestD=D; best=c;}
+          }
+          Qidx[i]=best; continue;
         }
-        Qidx[i]=best;
+
+        const Kk = Math.min(4, M);
+        const idxArr = new Int16Array(Kk);
+        const dArr = new Float32Array(Kk);
+        for(let k=0;k<Kk;k++){ idxArr[k] = -1; dArr[k]=Infinity; }
+        for(let c=0;c<M;c++){
+          const q=paletteYCG[c];
+          const dY=tY-q[0], dCo=tCo-q[1], dCg=tCg-q[2];
+          const D=wY*dY*dY + wC*(dCo*dCo + dCg*dCg);
+          if (D < dArr[Kk-1]){
+            let pos = Kk-1;
+            while (pos>0 && D < dArr[pos-1]){ dArr[pos]=dArr[pos-1]; idxArr[pos]=idxArr[pos-1]; pos--; }
+            dArr[pos]=D; idxArr[pos]=c;
+          }
+        }
+        if (idxArr[0] < 0){ Qidx[i]=0; continue; }
+        let sumW=0; const wts = new Float32Array(Kk); const epsW = 1e-9;
+        for(let k=0;k<Kk;k++){
+          const w = 1.0 / (dArr[k] + epsW);
+          wts[k] = w; sumW += w;
+        }
+        if (sumW <= 0){ Qidx[i] = idxArr[0]; continue; }
+        for(let k=0;k<Kk;k++) wts[k] /= sumW;
+
+        const pickT = Math.random();
+        let acc=0, chosen = idxArr[0];
+        for(let k=0;k<Kk;k++){ acc += wts[k]; if (pickT <= acc){ chosen = idxArr[k]; break; } }
+        Qidx[i] = chosen;
+      }
       }
     }
 
@@ -563,8 +645,9 @@
     const nsClamped = Math.max(0, Math.min(1, Number.isFinite(nsRaw) ? nsRaw : 0.5));
     const hvsMix = 1 - nsClamped;
     const trySwaps = !!doSwapsIn.checked;
+    const initMode = (initModeIn && initModeIn.value) || 'random';
     try{
-      const {Qidx, energy} = await runDBS({ W, H, TYCG, A8, paletteRGB, paletteLin, paletteYCG, sigma, radius, hvsMix, kCand, maxSweeps, wY, wC, lambdaF, seedQidx:null, trySwaps,
+      const {Qidx, energy} = await runDBS({ W, H, TYCG, A8, paletteRGB, paletteLin, paletteYCG, sigma, radius, hvsMix, kCand, maxSweeps, wY, wC, lambdaF, seedQidx:null, trySwaps, initMode,
         onProgress: ({sweep, E, moves, Qidx})=>{ setStatus(`Sweep ${sweep}…`); sSweep.textContent=String(sweep); sMoves.textContent=String(moves); sEnergy.textContent=Number(E).toExponential(4); drawOutFromQ(Qidx); } });
       sEnergy.textContent = Number(energy).toExponential(4);
       setStatus('Done'); log('Converged or reached limits.');
